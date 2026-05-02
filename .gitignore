@@ -1,0 +1,30 @@
+# 环境变量（含密钥，不提交！）
+.env
+.env.prod
+.env.local
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+
+# 数据库和索引（数据量大，用导出/导入同步）
+backend/data/
+
+# Node
+frontend/node_modules/
+frontend/.next/
+frontend/out/
+
+# Docker 临时文件
+*.log
+
+# macOS
+.DS_Store
+
+# IDE
+.idea/
+.vscode/
+*.swp

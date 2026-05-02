@@ -1,0 +1,59 @@
+version: '3.9'
+
+services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: jzs_postgres
+    environment:
+      POSTGRES_DB: jzs_db
+      POSTGRES_USER: jzs_user
+      POSTGRES_PASSWORD: jzs_pass
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./backend/db/init.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U jzs_user -d jzs_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: jzs_backend
+    ports:
+      - "8000:8000"
+    environment:
+      DATABASE_URL: postgresql://jzs_user:jzs_pass@postgres:5432/jzs_db
+      FAISS_INDEX_PATH: /app/data/faiss_index
+      EXPORT_PATH: /app/data/exports
+      LLM_API_KEY: ${LLM_API_KEY:-}
+      LLM_BASE_URL: ${LLM_BASE_URL:-https://api.openai.com/v1}
+      LLM_MODEL: ${LLM_MODEL:-gpt-4o-mini}
+      OCR_ENGINE: ${OCR_ENGINE:-paddleocr}
+    volumes:
+      - ./backend:/app
+      - app_data:/app/data
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command: uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: jzs_frontend
+    ports:
+      - "3000:3000"
+    environment:
+      NEXT_PUBLIC_API_URL: http://localhost:8000
+    depends_on:
+      - backend
+
+volumes:
+  postgres_data:
+  app_data:
