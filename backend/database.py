@@ -1,6 +1,7 @@
 import os
 import shutil
 from datetime import datetime
+from sqlalchemy import event
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 from sqlalchemy.orm import DeclarativeBase
 
@@ -18,6 +19,14 @@ engine = create_async_engine(
     connect_args={"check_same_thread": False},
 )
 AsyncSessionLocal = async_sessionmaker(engine, expire_on_commit=False)
+
+
+# 为每个新建的 SQLite 连接启用外键约束（aiosqlite 通过 sync_engine 暴露事件）
+@event.listens_for(engine.sync_engine, "connect")
+def _enable_sqlite_fk(dbapi_conn, _):
+    cursor = dbapi_conn.cursor()
+    cursor.execute("PRAGMA foreign_keys=ON")
+    cursor.close()
 
 
 class Base(DeclarativeBase):

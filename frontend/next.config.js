@@ -1,15 +1,20 @@
 /** @type {import('next').NextConfig} */
 const path = require('path')
 
+// 防止 Node.js 把本地请求走系统代理
+process.env.NO_PROXY = process.env.NO_PROXY
+  ? process.env.NO_PROXY + ',127.0.0.1,localhost'
+  : '127.0.0.1,localhost'
+
 const nextConfig = {
   env: {
-    NEXT_PUBLIC_API_URL: process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8004',
+    NEXT_PUBLIC_API_URL: process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:8004',
   },
   async rewrites() {
     return [
       {
         source: '/api/:path*',
-        destination: 'http://localhost:8004/:path*',
+        destination: 'http://127.0.0.1:8004/:path*',
       },
     ]
   },

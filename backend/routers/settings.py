@@ -42,11 +42,6 @@ class EmbeddingConfig(BaseModel):
     model: str = "BAAI/bge-large-zh-v1.5"
 
 
-class VisionConfig(BaseModel):
-    api_key: str
-    base_url: str = "https://api.apimart.ai/v1"
-    model: str = "gpt-4o-mini"
-
 
 @router.get("/ocr")
 async def get_ocr_config():
@@ -64,10 +59,10 @@ async def get_ocr_config():
         "embedding_api_key_preview": s.embedding_api_key[:4] + "****" if s.embedding_api_key else "",
         "embedding_base_url": s.embedding_base_url,
         "embedding_model": s.llm_embedding_model,
-        "vision_configured": bool(s.vision_api_key),
-        "vision_api_key_preview": s.vision_api_key[:4] + "****" if s.vision_api_key else "",
-        "vision_base_url": s.vision_base_url,
-        "vision_model": s.vision_model,
+        "card_configured": bool(s.card_api_key),
+        "card_api_key_preview": s.card_api_key[:4] + "****" if s.card_api_key else "",
+        "card_base_url": s.card_base_url,
+        "card_model": s.card_model,
     }
 
 
@@ -101,11 +96,18 @@ async def save_embedding_config(config: EmbeddingConfig):
     return {"status": "ok", "message": "Embedding 配置已保存，请重建向量索引"}
 
 
-@router.post("/vision")
-async def save_vision_config(config: VisionConfig):
-    """保存视觉模型 API 配置到 .env"""
-    _update_env("VISION_API_KEY", config.api_key)
-    _update_env("VISION_BASE_URL", config.base_url)
-    _update_env("VISION_MODEL", config.model)
+
+class CardConfig(BaseModel):
+    api_key: str
+    base_url: str = "https://api.apimart.ai/v1"
+    model: str = "gpt-4o-mini"
+
+
+@router.post("/card")
+async def save_card_config(config: CardConfig):
+    """保存 GPT 图片识别 API 配置到 .env"""
+    _update_env("CARD_API_KEY", config.api_key)
+    _update_env("CARD_BASE_URL", config.base_url)
+    _update_env("CARD_MODEL", config.model)
     get_settings.cache_clear()
-    return {"status": "ok", "message": "视觉模型配置已保存"}
+    return {"status": "ok", "message": "GPT 视觉模型配置已保存"}

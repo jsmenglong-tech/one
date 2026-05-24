@@ -15,12 +15,21 @@ export default function LoginModal({ role, onSuccess }: Props) {
   const [error, setError] = useState('')
 
   const isAdmin = role === 'admin'
-  const themeColor = isAdmin ? 'blue' : 'green'
   const title = isAdmin ? '管理后台登录' : '学习端登录'
-  const headerBg = isAdmin ? 'bg-blue-900' : 'bg-green-800'
-  const btnBg = isAdmin
-    ? 'bg-blue-600 hover:bg-blue-700'
-    : 'bg-green-600 hover:bg-green-700'
+  const subtitle = isAdmin ? '请输入管理员凭据继续' : '欢迎回来，请登录学习账号'
+  const icon = isAdmin ? '🗂️' : '📖'
+  const meshClass = isAdmin ? 'bg-mesh-indigo' : 'bg-mesh-emerald'
+  const brandGradient = isAdmin
+    ? 'from-indigo-500 to-violet-600'
+    : 'from-emerald-500 to-teal-600'
+  const brandShadow = isAdmin
+    ? 'shadow-indigo-500/30'
+    : 'shadow-emerald-500/30'
+  const textGradient = isAdmin ? 'text-gradient-indigo' : 'text-gradient-emerald'
+  const focusRing = isAdmin
+    ? 'focus:border-indigo-400 focus:shadow-[0_0_0_4px_rgba(99,102,241,0.12)]'
+    : 'focus:border-emerald-400 focus:shadow-[0_0_0_4px_rgba(16,185,129,0.12)]'
+  const btnClass = isAdmin ? 'btn-primary' : 'btn-emerald'
 
   async function handleLogin(e: React.FormEvent) {
     e.preventDefault()
@@ -47,48 +56,73 @@ export default function LoginModal({ role, onSuccess }: Props) {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50 flex flex-col">
-      <header className={`${headerBg} text-white px-8 py-4`}>
-        <h1 className="text-xl font-bold">一级建造师知识库系统</h1>
-      </header>
-      <div className="flex-1 flex items-center justify-center">
-        <div className="bg-white rounded-2xl shadow-lg p-8 w-full max-w-sm">
-          <h2 className="text-2xl font-bold text-gray-800 mb-1">{title}</h2>
-          <p className="text-gray-400 text-sm mb-6">请输入账号和密码继续</p>
+    <div className={`relative min-h-screen flex flex-col items-center justify-center px-6 py-10 overflow-hidden ${meshClass}`}>
+      {/* 顶部装饰光晕 */}
+      <div className={`absolute -top-32 left-1/2 -translate-x-1/2 w-[700px] h-[700px] rounded-full blur-3xl opacity-50 pointer-events-none bg-gradient-to-br ${brandGradient}`} style={{ filter: 'blur(120px)' }} />
+
+      {/* 返回首页 */}
+      <a href="/" className="absolute top-6 left-6 text-sm text-gray-500 hover:text-gray-800 transition-colors flex items-center gap-1.5">
+        <span aria-hidden>←</span> 返回首页
+      </a>
+
+      <div className="relative w-full max-w-sm animate-slide-up">
+        {/* 品牌徽章 */}
+        <div className="flex flex-col items-center mb-6">
+          <div className={`w-16 h-16 rounded-2xl bg-gradient-to-br ${brandGradient} flex items-center justify-center text-3xl shadow-lg ${brandShadow} mb-4`}>
+            {icon}
+          </div>
+          <div className="text-xs text-gray-500 mb-1">一级建造师知识库系统</div>
+          <h2 className={`text-2xl font-bold ${textGradient}`}>{title}</h2>
+          <p className="text-gray-400 text-sm mt-1">{subtitle}</p>
+        </div>
+
+        {/* 玻璃卡 */}
+        <div className="card-surface p-7 backdrop-blur-xl bg-white/85">
           <form onSubmit={handleLogin} className="space-y-4">
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">账号</label>
+              <label className="block text-xs font-medium text-gray-600 mb-1.5">账号</label>
               <input
                 type="text"
                 value={username}
                 onChange={e => setUsername(e.target.value)}
-                className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className={`input-base ${focusRing}`}
                 placeholder="请输入账号"
                 autoComplete="username"
               />
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">密码</label>
+              <label className="block text-xs font-medium text-gray-600 mb-1.5">密码</label>
               <input
                 type="password"
                 value={password}
                 onChange={e => setPassword(e.target.value)}
-                className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className={`input-base ${focusRing}`}
                 placeholder="请输入密码"
                 autoComplete="current-password"
               />
             </div>
             {error && (
-              <div className="text-red-500 text-sm bg-red-50 rounded-lg px-3 py-2">{error}</div>
+              <div className="text-red-600 text-xs bg-red-50 border border-red-100 rounded-lg px-3 py-2 flex items-center gap-2">
+                <span aria-hidden>⚠</span>{error}
+              </div>
             )}
             <button
               type="submit"
               disabled={loading}
-              className={`w-full ${btnBg} text-white py-2.5 rounded-lg font-medium transition-colors disabled:opacity-50`}
+              className={`${btnClass} w-full py-2.5`}
             >
-              {loading ? '登录中...' : '登录'}
+              {loading ? (
+                <span className="inline-flex items-center gap-2">
+                  <span className="w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin" />
+                  登录中...
+                </span>
+              ) : '登录'}
             </button>
           </form>
+        </div>
+
+        <div className="text-center text-xs text-gray-400 mt-6">
+          © {new Date().getFullYear()} 一建知识库系统
         </div>
       </div>
     </div>

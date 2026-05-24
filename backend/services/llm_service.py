@@ -175,3 +175,42 @@ async def split_to_knowledge_points(content: str) -> list[dict]:
         {"role": "user", "content": prompt},
     ], temperature=0.2)
     return extract_json(result)
+
+
+CONSOLIDATE_PROMPT = """你是一建实务知识点整理专家。下面是从同一来源（一张图片）中识别并初步拆分出的多个知识点条目（JSON 数组形式）。
+
+请将它们**归类、整合、提炼**，合并为一个完整的大知识点。要求：
+
+1. 围绕整体主题，给一个简洁的大标题（不超过 30 字）
+2. content 使用结构化 Markdown 格式：
+   - 用 `## 二级标题` 区分小节，归类相关条目
+   - 用列表 / 表格保留要点和数据
+   - 保留所有关键信息（数据、规范、流程、判定标准等）
+3. 综合所有原始条目，**不遗漏要点，但去除重复和冗余**
+4. 标签从原始条目标签中合并去重；难度取原始条目的最大值
+5. 若原始条目中含有例题（item_type=example），单独放在 `## 配套例题` 小节内（保留题干+答案）
+6. content 总长度建议不超过 1800 字，便于语义检索
+
+原始拆分条目：
+{raw_points}
+
+返回 JSON（不要有任何其他文字）：
+{{
+  "title": "大知识点标题",
+  "content": "完整的 Markdown 内容...",
+  "tags": ["高频", "记忆类"],
+  "difficulty": 3
+}}"""
+
+
+async def consolidate_points(points: list[dict]) -> dict:
+    """DeepSeek (LLM_API_KEY) 归纳整合多条知识点为一条大知识点"""
+    if not points:
+        raise RuntimeError("无可归纳的知识点")
+    raw_points_json = json.dumps(points, ensure_ascii=False, indent=2)
+    prompt = CONSOLIDATE_PROMPT.format(raw_points=raw_points_json)
+    result = await chat_completion([
+        {"role": "system", "content": "你是一建实务知识结构化专家，只输出JSON。"},
+        {"role": "user", "content": prompt},
+    ], temperature=0.3)
+    return extract_json(result)

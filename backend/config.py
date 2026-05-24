@@ -20,10 +20,10 @@ class Settings(BaseSettings):
     baidu_ocr_api_key: str = ""
     baidu_ocr_secret_key: str = ""
 
-    # 视觉模型配置（用于图片AI识别，独立于文字LLM）
-    vision_api_key: str = ""
-    vision_base_url: str = "https://api.apimart.ai/v1"
-    vision_model: str = "gpt-4o-mini"
+    # 图片总结卡专用模型配置（固定 GPT-4o-mini，独立于OCR视觉模型）
+    card_api_key: str = ""
+    card_base_url: str = "https://api.apimart.ai/v1"
+    card_model: str = "gpt-4o-mini"
 
     # 鉴权配置
     jwt_secret: str = "change-me-in-production-please-use-a-long-random-string"

@@ -13,8 +13,11 @@ from services.knowledge_service import (
     list_knowledge_points
 )
 from services.vector_service import get_vector_service
-from services.ocr_service import extract_text_from_image, extract_and_split_by_vision, describe_image_for_card
-from services.llm_service import split_to_knowledge_points
+from services.ocr_service import (
+    extract_text_from_image,
+    describe_image_for_card,
+)
+from services.llm_service import split_to_knowledge_points, consolidate_points, filter_ads
 
 router = APIRouter(prefix="/knowledge", tags=["知识点"])
 settings = get_settings()
@@ -74,66 +77,66 @@ async def import_chapter(req: ChapterImportRequest, db: AsyncSession = Depends(g
 async def import_image(
     chapter_id: int = Form(...),
     source: Optional[str] = Form(None),
-    ocr_engine: str = Form('deepseek'),
+    ocr_engine: str = Form('baidu'),  # 保留参数名以兼容前端，实际只支持 baidu
     file: UploadFile = File(...),
     db: AsyncSession = Depends(get_db),
 ):
     image_bytes = await file.read()
     vector_svc = get_vector_service()
 
-    if ocr_engine == 'deepseek' or ocr_engine == 'vision':
-        # GPT-4o-mini 视觉识别：直接识别图片并拆分为知识点
-        try:
-            points = await extract_and_split_by_vision(image_bytes)
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=f"视觉识别失败: {str(e)}")
-        if not points:
-            raise HTTPException(status_code=400, detail="视觉识别未从图片中提取到知识点")
-
-        from services.knowledge_service import add_knowledge_point
-        saved = []
-        for p in points:
-            kp = await add_knowledge_point(
-                db=db, vector_svc=vector_svc,
-                title=p.get('title', ''),
-                content=p.get('content', ''),
-                chapter_id=chapter_id,
-                tags=p.get('tags', []),
-                difficulty=p.get('difficulty', 3),
-                source=source or file.filename,
-                item_type=p.get('item_type', 'knowledge'),
-            )
-            if kp:
-                saved.append(kp)
-        await db.commit()
-        return {
-            "status": "ok",
-            "engine": "vision",
-            "imported": len(saved),
-            "knowledge_count": sum(1 for kp in saved if kp.item_type == 'knowledge'),
-            "example_count": sum(1 for kp in saved if kp.item_type == 'example'),
-            "ids": [kp.id for kp in saved],
-        }
-    else:
-        # 传统 OCR + LLM 拆分流程
+    # ── 百度 OCR + DeepSeek 拆分 + DeepSeek 归纳 → 入库单条 ──
+    ocr_text_preview = None
+    try:
         ocr_text = await extract_text_from_image(image_bytes)
+        ocr_text = filter_ads(ocr_text)
         if not ocr_text.strip():
             raise HTTPException(status_code=400, detail="OCR未识别到文字")
-        saved = await import_chapter_content(
-            db=db, vector_svc=vector_svc,
-            chapter_id=chapter_id,
-            raw_content=ocr_text,
-            source=source or file.filename,
-        )
-        return {
-            "status": "ok",
-            "engine": ocr_engine,
-            "ocr_text": ocr_text[:200] + "..." if len(ocr_text) > 200 else ocr_text,
-            "imported": len(saved),
-            "knowledge_count": sum(1 for kp in saved if kp.item_type == 'knowledge'),
-            "example_count": sum(1 for kp in saved if kp.item_type == 'example'),
-            "ids": [kp.id for kp in saved],
-        }
+        ocr_text_preview = ocr_text[:200] + "..." if len(ocr_text) > 200 else ocr_text
+        raw_points = await split_to_knowledge_points(ocr_text)
+        if not raw_points:
+            raise HTTPException(status_code=400, detail="DeepSeek 未能从 OCR 文本中拆分出知识点")
+        consolidated = await consolidate_points(raw_points)
+        engine_label = "baidu"
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"识别/归纳失败: {str(e)}")
+
+    # ── 入库（单条记录）──
+    from services.knowledge_service import add_knowledge_point
+    kp = await add_knowledge_point(
+        db=db, vector_svc=vector_svc,
+        title=consolidated.get('title', ''),
+        content=consolidated.get('content', ''),
+        chapter_id=chapter_id,
+        tags=consolidated.get('tags', []),
+        difficulty=consolidated.get('difficulty', 3),
+        source=source or file.filename,
+        item_type='knowledge',
+    )
+    await db.commit()
+
+    if not kp:
+        return {"status": "duplicate", "message": "该知识点已存在（内容重复）"}
+
+    content = consolidated.get('content', '')
+    resp = {
+        "status": "ok",
+        "engine": engine_label,
+        "imported": 1,
+        "knowledge_count": 1,
+        "example_count": 0,
+        "ids": [kp.id],
+        "title": kp.title,
+        "content": content,
+        "tags": consolidated.get('tags', []),
+        "difficulty": consolidated.get('difficulty', 3),
+        "raw_points_count": len(raw_points),
+        "raw_points": raw_points,
+    }
+    if ocr_text_preview is not None:
+        resp["ocr_text"] = ocr_text_preview
+    return resp
 
 
 @router.get("/list")
@@ -362,13 +365,48 @@ async def update_knowledge(knowledge_id: str, req: KnowledgeUpdateRequest, db: A
     return {"status": "ok", "id": kp.id, "title": kp.title}
 
 
+class BatchDeleteRequest(BaseModel):
+    ids: list[str]
+
+
+@router.post("/batch-delete")
+async def batch_delete_knowledge(req: BatchDeleteRequest, db: AsyncSession = Depends(get_db)):
+    """批量删除知识点。返回成功删除的数量。"""
+    import logging, traceback
+    logger = logging.getLogger("knowledge.batch_delete")
+    if not req.ids:
+        raise HTTPException(status_code=400, detail="ids 不能为空")
+    try:
+        result = await db.execute(select(KnowledgePoint).where(KnowledgePoint.id.in_(req.ids)))
+        kps = result.scalars().all()
+        deleted_ids = []
+        for kp in kps:
+            await db.delete(kp)
+            deleted_ids.append(kp.id)
+        await db.commit()
+        return {"status": "ok", "deleted_count": len(deleted_ids), "deleted_ids": deleted_ids}
+    except Exception as e:
+        tb = traceback.format_exc()
+        logger.error(f"[POST /knowledge/batch-delete] 批量删除失败: {e}\n{tb}")
+        raise HTTPException(status_code=500, detail=f"批量删除失败: {str(e)}")
+
+
 @router.delete("/{knowledge_id}")
 async def delete_knowledge(knowledge_id: str, db: AsyncSession = Depends(get_db)):
-    result = await db.execute(select(KnowledgePoint).where(KnowledgePoint.id == knowledge_id))
-    kp = result.scalar_one_or_none()
-    if not kp:
-        raise HTTPException(status_code=404, detail="知识点不存在")
-    await db.delete(kp)
-    await db.commit()
-    return {"status": "ok"}
+    import logging, traceback
+    logger = logging.getLogger("knowledge.delete")
+    try:
+        result = await db.execute(select(KnowledgePoint).where(KnowledgePoint.id == knowledge_id))
+        kp = result.scalar_one_or_none()
+        if not kp:
+            raise HTTPException(status_code=404, detail="知识点不存在")
+        await db.delete(kp)
+        await db.commit()
+        return {"status": "ok"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        tb = traceback.format_exc()
+        logger.error(f"[DELETE /knowledge/{knowledge_id}] 删除失败: {e}\n{tb}")
+        raise HTTPException(status_code=500, detail=f"删除失败: {str(e)}")
 

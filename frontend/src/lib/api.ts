@@ -41,6 +41,7 @@ export const getKnowledge = (params?: any) => api.get('/knowledge/list', { param
 export const addKnowledge = (data: any) => api.post('/knowledge/add', data).then(r => r.data)
 export const updateKnowledge = (id: string, data: any) => api.put(`/knowledge/${id}`, data).then(r => r.data)
 export const deleteKnowledge = (id: string) => api.delete(`/knowledge/${id}`).then(r => r.data)
+export const batchDeleteKnowledge = (ids: string[]) => api.post('/knowledge/batch-delete', { ids }).then(r => r.data)
 export const importChapter = (data: any) => api.post('/knowledge/import-chapter', data).then(r => r.data)
 export const previewSplit = (data: any) => api.post('/knowledge/preview-split', data).then(r => r.data)
 export const searchKnowledge = (q: string, top_k = 5) =>
@@ -71,8 +72,8 @@ export const saveDeepSeekConfig = (data: { api_key: string; base_url?: string; m
   api.post('/settings/ocr/deepseek', data).then(r => r.data)
 export const saveEmbeddingConfig = (data: { api_key: string; base_url?: string; model?: string }) =>
   api.post('/settings/embedding', data).then(r => r.data)
-export const saveVisionConfig = (data: { api_key: string; base_url?: string; model?: string }) =>
-  api.post('/settings/vision', data).then(r => r.data)
+export const saveCardConfig = (data: { api_key: string; base_url?: string; model?: string }) =>
+  api.post('/settings/card', data).then(r => r.data)
 
 export const addImageCard = (chapter_id: number, file: File, source?: string) => {
   const form = new FormData()

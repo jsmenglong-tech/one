@@ -21,21 +21,24 @@ if (Test-Path $dbPath) {
     Write-Host "数据库文件不存在，将在启动时自动创建" -ForegroundColor Yellow
 }
 
+# ── venv python 路径 ───────────────────────────────────────────
+$venvPython = "$PWD\backend\venv\Scripts\python.exe"
+
 # ── 安装后端依赖（仅首次或依赖有变化时需要）────────────────────
-$backendReady = python -c "import fastapi, uvicorn, sqlalchemy, aiosqlite" 2>$null; $?
+$backendReady = & $venvPython -c "import fastapi, uvicorn, sqlalchemy, aiosqlite" 2>$null; $?
 if (-not $backendReady) {
     Write-Host "`n[1/4] 安装后端依赖..." -ForegroundColor Yellow
-    python -m pip install fastapi "uvicorn[standard]" sqlalchemy aiosqlite pydantic pydantic-settings python-multipart httpx openai numpy Pillow python-dotenv aiofiles --user -q
+    & $venvPython -m pip install fastapi "uvicorn[standard]" sqlalchemy aiosqlite pydantic pydantic-settings python-multipart httpx openai numpy Pillow python-dotenv aiofiles -q
     Write-Host "后端依赖安装完成" -ForegroundColor Green
 } else {
     Write-Host "`n[1/4] 后端依赖已就绪，跳过安装" -ForegroundColor Green
 }
 
 # ── 尝试安装 faiss ─────────────────────────────────────────────
-$faissOk = python -c "import faiss" 2>$null; $?
+$faissOk = & $venvPython -c "import faiss" 2>$null; $?
 if (-not $faissOk) {
     Write-Host "`n[2/4] 尝试安装 faiss-cpu..." -ForegroundColor Yellow
-    python -m pip install faiss-cpu --user -q 2>$null
+    & $venvPython -m pip install faiss-cpu -q 2>$null
     if ($LASTEXITCODE -eq 0) {
         Write-Host "faiss-cpu 安装成功" -ForegroundColor Green
     } else {
@@ -72,12 +75,58 @@ Write-Host "前端: http://localhost:3000" -ForegroundColor Cyan
 Write-Host "API文档: http://localhost:8004/docs" -ForegroundColor Cyan
 Write-Host ""
 
-# ── 启动后端（去掉 --reload，避免热重载异常导致数据问题）──────
-Start-Process powershell -ArgumentList "-NoExit", "-Command", "`$env:PYTHONUTF8='1'; `$env:PYTHONIOENCODING='utf-8'; cd '$PWD\backend'; python -m uvicorn main:app --port 8004"
+# ── 启动后端（在当前终端内运行，不弹新窗口）──────────────────
+$rootDir = $PWD.Path
+$venvPythonAbs = "$rootDir\backend\venv\Scripts\python.exe"
+$env:PYTHONUTF8 = '1'
+$env:PYTHONIOENCODING = 'utf-8'
 
-# ── 启动前端 ───────────────────────────────────────────────────
-Start-Process powershell -ArgumentList "-NoExit", "-Command", "cd '$PWD\frontend'; npm run dev"
+Write-Host "`n▶ 启动后端 (Job)..." -ForegroundColor Cyan
+$backendJob = Start-Job -Name "Backend" -ScriptBlock {
+    param($pyExe, $root)
+    Set-Location "$root\backend"
+    $env:PYTHONUTF8 = '1'
+    $env:PYTHONIOENCODING = 'utf-8'
+    & $pyExe -m uvicorn main:app --host 0.0.0.0 --port 8004
+} -ArgumentList $venvPythonAbs, $rootDir
 
-Write-Host "两个新窗口已打开，等待10秒后自动打开浏览器..." -ForegroundColor Green
-Start-Sleep 10
-Start-Process "http://localhost:3000"
+Write-Host "▶ 启动前端 (Job)..." -ForegroundColor Cyan
+$frontendJob = Start-Job -Name "Frontend" -ScriptBlock {
+    param($root)
+    Set-Location "$root\frontend"
+    npm run dev
+} -ArgumentList $rootDir
+
+Write-Host "`n服务启动中，等待10秒后打开浏览器..." -ForegroundColor Green
+Write-Host "（按 Ctrl+C 可停止，输入 'Stop-Job Backend,Frontend' 可终止后台任务）" -ForegroundColor DarkGray
+
+# 实时输出日志到当前终端
+$timer = 0
+while ($true) {
+    Start-Sleep 2
+    $timer += 2
+
+    $bOut = Receive-Job -Job $backendJob 2>&1
+    $fOut = Receive-Job -Job $frontendJob 2>&1
+
+    if ($bOut) { $bOut | ForEach-Object { Write-Host "[后端] $_" -ForegroundColor DarkCyan } }
+    if ($fOut) { $fOut | ForEach-Object { Write-Host "[前端] $_" -ForegroundColor DarkGreen } }
+
+    # 10秒后自动打开浏览器（只开一次）
+    if ($timer -eq 10) {
+        Start-Process "http://localhost:3000"
+        Write-Host "`n✓ 浏览器已打开 http://localhost:3000" -ForegroundColor Green
+    }
+
+    # 检查任务是否异常退出
+    if ($backendJob.State -eq 'Failed') {
+        Write-Host "[后端] 任务异常退出！" -ForegroundColor Red
+        Receive-Job -Job $backendJob 2>&1 | Write-Host
+        break
+    }
+    if ($frontendJob.State -eq 'Failed') {
+        Write-Host "[前端] 任务异常退出！" -ForegroundColor Red
+        Receive-Job -Job $frontendJob 2>&1 | Write-Host
+        break
+    }
+}

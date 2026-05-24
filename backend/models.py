@@ -41,7 +41,8 @@ class KnowledgePoint(Base):
     updated_at = Column(DateTime, default=datetime.utcnow)
 
     chapter = relationship("Chapter", back_populates="knowledge_points")
-    question_maps = relationship("QuestionKnowledgeMap", back_populates="knowledge")
+    question_maps = relationship("QuestionKnowledgeMap", back_populates="knowledge",
+                                 cascade="all, delete-orphan", passive_deletes=True)
 
 
 class Question(Base):
@@ -56,7 +57,8 @@ class Question(Base):
     quality_checked = Column(Boolean, default=False)
     created_at = Column(DateTime, default=datetime.utcnow)
 
-    knowledge_maps = relationship("QuestionKnowledgeMap", back_populates="question")
+    knowledge_maps = relationship("QuestionKnowledgeMap", back_populates="question",
+                                  cascade="all, delete-orphan", passive_deletes=True)
 
 
 class QuestionKnowledgeMap(Base):

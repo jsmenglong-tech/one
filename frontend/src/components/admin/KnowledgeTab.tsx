@@ -3,7 +3,7 @@ import { useState, useEffect } from 'react'
 import {
   getSubjects, createSubject, updateSubject, deleteSubject,
   getChapters, createChapter, updateChapter, deleteChapter,
-  getKnowledge, searchKnowledge, deleteKnowledge, updateKnowledge
+  getKnowledge, searchKnowledge, deleteKnowledge, batchDeleteKnowledge, updateKnowledge
 } from '@/lib/api'
 
 const DIFFICULTY_LABEL: Record<number, string> = {
@@ -46,7 +46,7 @@ function EditModal({ kp, chapters, onClose, onSaved }: {
 
   return (
     <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
-      <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg max-h-[90vh] overflow-y-auto">
+      <div className="bg-white rounded-2xl shadow-xl w-full max-w-2xl max-h-[90vh] overflow-y-auto">
         <div className="px-6 py-4 border-b flex items-center justify-between">
           <span className="font-bold text-gray-800">修改知识点</span>
           <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-xl">×</button>
@@ -59,7 +59,7 @@ function EditModal({ kp, chapters, onClose, onSaved }: {
           </div>
           <div>
             <label className="text-xs text-gray-500 block mb-1">内容</label>
-            <textarea className="border rounded-lg px-3 py-2 w-full text-sm h-28 resize-none"
+            <textarea className="border rounded-lg px-3 py-2 w-full text-sm h-72 resize-y font-mono leading-relaxed"
               value={form.content} onChange={e => setForm(f => ({ ...f, content: e.target.value }))} />
           </div>
           <div className="flex gap-3">
@@ -119,6 +119,13 @@ function KnowledgeListPanel() {
   const [editKp, setEditKp] = useState<any>(null)
   const [deleteKp, setDeleteKp] = useState<any>(null)
   const [deleting, setDeleting] = useState(false)
+  const [deleteError, setDeleteError] = useState('')
+  // 批量删除状态
+  const [selectMode, setSelectMode] = useState(false)
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
+  const [showBatchConfirm, setShowBatchConfirm] = useState(false)
+  const [batchDeleting, setBatchDeleting] = useState(false)
+  const [batchError, setBatchError] = useState('')
 
   function flattenChapters(tree: any[], prefix = ''): any[] {
     return tree.flatMap((c: any) => [
@@ -169,6 +176,7 @@ function KnowledgeListPanel() {
   async function handleDelete() {
     if (!deleteKp) return
     setDeleting(true)
+    setDeleteError('')
     try {
       await deleteKnowledge(deleteKp.id)
       setDeleteKp(null)
@@ -178,12 +186,57 @@ function KnowledgeListPanel() {
         item_type: itemType || undefined,
         page, size: 15
       }).then(setData).finally(() => setLoading(false))
+    } catch (e: any) {
+      setDeleteError(e?.response?.data?.detail || e?.message || '删除失败，请重试')
     } finally {
       setDeleting(false)
     }
   }
 
   const displayItems = searchResult ? searchResult.results : data?.items || []
+
+  function toggleSelect(id: string) {
+    setSelectedIds(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id); else next.add(id)
+      return next
+    })
+  }
+
+  function toggleSelectAll() {
+    if (selectedIds.size === displayItems.length && displayItems.length > 0) {
+      setSelectedIds(new Set())
+    } else {
+      setSelectedIds(new Set(displayItems.map((kp: any) => kp.id)))
+    }
+  }
+
+  function exitSelectMode() {
+    setSelectMode(false)
+    setSelectedIds(new Set())
+    setBatchError('')
+  }
+
+  async function handleBatchDelete() {
+    if (selectedIds.size === 0) return
+    setBatchDeleting(true)
+    setBatchError('')
+    try {
+      await batchDeleteKnowledge(Array.from(selectedIds))
+      setShowBatchConfirm(false)
+      exitSelectMode()
+      setLoading(true)
+      getKnowledge({
+        chapter_id: chapterId || undefined,
+        item_type: itemType || undefined,
+        page, size: 15
+      }).then(setData).finally(() => setLoading(false))
+    } catch (e: any) {
+      setBatchError(e?.response?.data?.detail || e?.message || '批量删除失败')
+    } finally {
+      setBatchDeleting(false)
+    }
+  }
 
   return (
     <div className="space-y-4">
@@ -199,8 +252,9 @@ function KnowledgeListPanel() {
           <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm p-6">
             <div className="text-base font-bold text-gray-800 mb-2">确认删除该知识点？</div>
             <div className="text-sm text-gray-500 mb-4">「{deleteKp.title}」删除后不可恢复。</div>
+            {deleteError && <div className="text-red-500 text-sm mb-3">{deleteError}</div>}
             <div className="flex justify-end gap-2">
-              <button onClick={() => setDeleteKp(null)} className="px-4 py-2 border rounded-lg text-sm text-gray-600 hover:bg-gray-50">取消</button>
+              <button onClick={() => { setDeleteKp(null); setDeleteError('') }} className="px-4 py-2 border rounded-lg text-sm text-gray-600 hover:bg-gray-50">取消</button>
               <button onClick={handleDelete} disabled={deleting}
                 className="px-4 py-2 bg-red-500 text-white rounded-lg text-sm hover:bg-red-600 disabled:opacity-50">
                 {deleting ? '删除中...' : '确认删除'}
@@ -276,19 +330,68 @@ function KnowledgeListPanel() {
         </div>
       </div>
 
+      {/* 批量删除确认弹窗 */}
+      {showBatchConfirm && (
+        <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm p-6">
+            <div className="text-base font-bold text-gray-800 mb-2">确认批量删除？</div>
+            <div className="text-sm text-gray-500 mb-4">将删除选中的 <span className="text-red-600 font-bold">{selectedIds.size}</span> 个知识点，删除后不可恢复。</div>
+            {batchError && <div className="text-red-500 text-sm mb-3">{batchError}</div>}
+            <div className="flex justify-end gap-2">
+              <button onClick={() => { setShowBatchConfirm(false); setBatchError('') }}
+                className="px-4 py-2 border rounded-lg text-sm text-gray-600 hover:bg-gray-50">取消</button>
+              <button onClick={handleBatchDelete} disabled={batchDeleting}
+                className="px-4 py-2 bg-red-500 text-white rounded-lg text-sm hover:bg-red-600 disabled:opacity-50">
+                {batchDeleting ? '删除中...' : `确认删除 ${selectedIds.size} 个`}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* 列表 */}
       <div className="bg-white rounded-xl shadow">
         <div className="px-4 py-3 border-b flex items-center justify-between">
           <span className="font-medium text-gray-700">
             {searchResult ? `搜索结果（${searchResult.results.length}条）` : `知识点列表（共 ${data?.total ?? '...'} 条）`}
           </span>
+          <div className="flex items-center gap-2">
+            {selectMode ? (
+              <>
+                <button onClick={toggleSelectAll}
+                  className="text-xs px-3 py-1 rounded border border-gray-300 text-gray-600 hover:bg-gray-50">
+                  {selectedIds.size === displayItems.length && displayItems.length > 0 ? '取消全选' : '全选本页'}
+                </button>
+                <span className="text-xs text-gray-500">已选 {selectedIds.size} 个</span>
+                <button onClick={() => setShowBatchConfirm(true)} disabled={selectedIds.size === 0}
+                  className="text-xs px-3 py-1 rounded bg-red-500 text-white hover:bg-red-600 disabled:opacity-40">
+                  删除选中
+                </button>
+                <button onClick={exitSelectMode}
+                  className="text-xs px-3 py-1 rounded border border-gray-300 text-gray-600 hover:bg-gray-50">
+                  取消
+                </button>
+              </>
+            ) : (
+              <button onClick={() => setSelectMode(true)}
+                className="text-xs px-3 py-1 rounded border border-red-300 text-red-500 hover:bg-red-50">
+                批量删除
+              </button>
+            )}
+          </div>
         </div>
         {loading && <div className="p-8 text-center text-gray-400">加载中...</div>}
         <div className="divide-y">
           {displayItems.map((kp: any) => (
-            <div key={kp.id} className="p-4 hover:bg-gray-50">
+            <div key={kp.id} className={`p-4 hover:bg-gray-50 ${selectMode && selectedIds.has(kp.id) ? 'bg-red-50' : ''}`}>
               <div className="flex items-start justify-between gap-2">
-                <div className="font-medium text-gray-800 text-sm flex-1">{kp.title}</div>
+                {selectMode && (
+                  <input type="checkbox" className="mt-1 w-4 h-4 accent-red-500 cursor-pointer"
+                    checked={selectedIds.has(kp.id)}
+                    onChange={() => toggleSelect(kp.id)} />
+                )}
+                <div className="font-medium text-gray-800 text-sm flex-1 cursor-pointer"
+                  onClick={() => selectMode && toggleSelect(kp.id)}>{kp.title}</div>
                 <div className="flex items-center gap-2 flex-shrink-0">
                   {kp.item_type === 'example' ? (
                     <span className="text-xs px-2 py-0.5 rounded-full bg-orange-100 text-orange-600">例题</span>
