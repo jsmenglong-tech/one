@@ -9,7 +9,7 @@ from database import get_db
 from models import KnowledgePoint
 from config import get_settings
 from services.knowledge_service import (
-    add_knowledge_point, import_chapter_content,
+    add_knowledge_point,
     list_knowledge_points
 )
 from services.vector_service import get_vector_service
@@ -57,19 +57,51 @@ async def add_knowledge(req: KnowledgeAddRequest, db: AsyncSession = Depends(get
 
 @router.post("/import-chapter")
 async def import_chapter(req: ChapterImportRequest, db: AsyncSession = Depends(get_db)):
+    """文本导入：拆分 → 归纳整合 → 入库单条（与图片 OCR 导入格式一致）"""
     vector_svc = get_vector_service()
-    saved = await import_chapter_content(
+
+    if not req.content or not req.content.strip():
+        raise HTTPException(status_code=400, detail="导入内容为空")
+
+    try:
+        cleaned_content = filter_ads(req.content)
+        raw_points = await split_to_knowledge_points(cleaned_content)
+        if not raw_points:
+            raise HTTPException(status_code=400, detail="DeepSeek 未能从文本中拆分出知识点")
+        consolidated = await consolidate_points(raw_points)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"拆分/归纳失败: {str(e)}")
+
+    kp = await add_knowledge_point(
         db=db, vector_svc=vector_svc,
+        title=consolidated.get('title', ''),
+        content=consolidated.get('content', ''),
         chapter_id=req.chapter_id,
-        raw_content=req.content,
+        tags=consolidated.get('tags', []),
+        difficulty=consolidated.get('difficulty', 3),
         source=req.source,
+        item_type='knowledge',
     )
+    await db.commit()
+
+    if not kp:
+        return {"status": "duplicate", "message": "该知识点已存在（内容重复）"}
+
     return {
         "status": "ok",
-        "imported": len(saved),
-        "knowledge_count": sum(1 for kp in saved if kp.item_type == 'knowledge'),
-        "example_count": sum(1 for kp in saved if kp.item_type == 'example'),
-        "ids": [kp.id for kp in saved]
+        "engine": "deepseek",
+        "imported": 1,
+        "knowledge_count": 1,
+        "example_count": 0,
+        "ids": [kp.id],
+        "title": kp.title,
+        "content": consolidated.get('content', ''),
+        "tags": consolidated.get('tags', []),
+        "difficulty": consolidated.get('difficulty', 3),
+        "raw_points_count": len(raw_points),
+        "raw_points": raw_points,
     }
 
 
